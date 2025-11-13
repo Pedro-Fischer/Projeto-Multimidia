@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consultor de Moda GIOR</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            transition: border 0.3s ease;
+        }
+
+        #videoFeed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .status-badge {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+            backdrop-filter: blur(10px);
+        }
+
+        .status-inactive {
+            background: rgba(239, 68, 68, 0.9);
+            color: white;
+        }
+
+        .status-active {
+            background: rgba(34, 197, 94, 0.9);
+            color: white;
+        }
+
+        .status-countdown {
+            background: rgba(251, 191, 36, 0.95);
+            color: #1a1a1a;
+            font-size: 1.2em;
+            animation: pulse 1s infinite;
+        }
+
+        .captured-preview {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .captured-preview img {
+            width: 100%;
+            border-radius: 10px;
+            border: 3px solid #d4af37;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .btn-full-width {
+            grid-column: 1 / -1;
+        }
+
+        .btn {
+            padding: 15px 25px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #d4af37 0%, #b8941e 100%);
+            color: #1a1a1a;
+            font-weight: 900;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            color: #1a1a1a;
+            font-weight: 900;
+        }
+
+        .btn-full {
+            grid-column: 1 / -1;
+        }
+
+        .audio-section {
+            margin-top: 20px;
+        }
+
+        .transcricao-box {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 10px;
+            min-height: 100px;
+            margin: 15px 0;
+            font-size: 1.1em;
+            line-height: 1.6;
+        }
+
+        .resposta-box {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 4px solid #d4af37;
+        }
+
+        .resposta-box h3 {
+            color: #d4af37;
+            margin-bottom: 10px;
+        }
+
+        .resposta-text {
+            font-size: 1.1em;
+            line-height: 1.8;
+            color: #f0f0f0;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 15px;
+        }
+
+        .recording-indicator {
+            display: none;
+            color: #ef4444;
+            font-weight: bold;
+            text-align: center;
+            padding: 10px;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .recording-indicator.active {
+            display: block;
+        }
+
+        .log-section {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 0.9em;
+        }
+
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .emoji {
+            font-size: 1.3em;
+        }
+
+        @media (max-width: 968px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .controls {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Consultor de Moda GIOR</h1>
+            <p class="subtitle">Críticas de Moda Honestas com IA</p>
+        </header>
+
+        <div class="main-grid">
+            <!-- Coluna da Câmera -->
+            <div class="card">
+                <h2>Seu Look</h2>
+                <div class="video-container">
+                    <img id="videoFeed" src="/video_feed" alt="Câmera desativada">
+                    <div id="statusBadge" class="status-badge status-inactive">● Sistema Inativo</div>
+                </div>
+
+                <div class="captured-preview" id="capturedPreview">
+                    <h3>📸 Look Capturado para Análise</h3>
+                    <img id="capturedImage" src="" alt="Imagem capturada">
+                </div>
+            </div>
+
+            <!-- Coluna de Controles -->
+            <div class="card">
+                <h2>🎮 Controles</h2>
+                <div class="controls">
+                    <button class="btn btn-primary btn-full-width" onclick="ativarSistema()">
+                        <span class="emoji">🚀</span> Ativar Sistema
+                    </button>
+
+                    <button class="btn btn-success" onclick="iniciarGravacao()" id="btnGravar" disabled>
+                        <span class="emoji">🎤</span> Fazer Pergunta
+                    </button>
+
+                    <button class="btn btn-danger" onclick="pararGravacao()" id="btnParar" disabled>
+                        <span class="emoji">⏹️</span> Parar
+                    </button>
+
+                    <button class="btn btn-warning" onclick="capturarImagem()" id="btnCapturar" disabled>
+                        <span class="emoji">📸</span> Capturar Look
+                    </button>
+
+                    <button class="btn btn-warning" onclick="document.getElementById('fileInput').click()" id="btnUpload" disabled>
+                        <span class="emoji">📁</span> Enviar Foto
+                    </button>
+
+                    <button class="btn btn-primary btn-full-width" onclick="obterDescricao()" id="btnDescrever" disabled>
+                        <span class="emoji">💬</span> Obter Crítica
+                    </button>
+                    
+                    <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="uploadImagem(event)">
+
+                    <button class="btn btn-danger btn-full-width" onclick="desativarSistema()" id="btnDesativar" disabled>
+                        <span class="emoji">⏹️</span> Desativar Sistema
+                    </button>
+                </div>
+
+                <div class="recording-indicator" id="recordingIndicator">
+                    🔴 GRAVANDO...
+                </div>
+            </div>
+        </div>
+
+        <!-- Seção de Transcrição e Resposta -->
+        <div class="card">
+            <h2>Sua Pergunta e Crítica</h2>
+            
+            <div class="audio-section">
+                <h3>Sua Pergunta sobre o Look:</h3>
+                <div class="transcricao-box" id="transcricaoBox">
+                    <em>Pergunte algo como: "Este look combina para um jantar formal?" ou "Essa combinação funciona?"</em>
+                </div>
+            </div>
+
+            <div class="resposta-box" id="respostaBox" style="display: none;">
+                <h3>👔 Crítica do GIOR:</h3>
+                <div class="resposta-text" id="respostaText"></div>
+                <audio id="audioResposta" controls style="display: none;"></audio>
+            </div>
+
+            <div class="log-section" id="logSection">
+                <strong>📋 Log de Atividades:</strong>
+                <div id="logEntries"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let mediaRecorder;
+        let audioChunks = [];
+        let sistemaAtivo = false;
+
+        // Som de beep para contagem (opcional)
+        const beep = (freq = 800, duration = 100) => {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                
+                oscillator.frequency.value = freq;
+                oscillator.type = 'sine';
+                
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration / 1000);
+                
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + duration / 1000);
+            } catch (e) {
+                // Navegador não suporta ou bloqueou áudio
+            }
+        };
+
+        // Logs
+        function addLog(message) {
+            const logEntries = document.getElementById('logEntries');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString('pt-BR');
+            entry.textContent = `[${time}] ${message}`;
+            logEntries.insertBefore(entry, logEntries.firstChild);
+        }
+
+        // Ativar Sistema
+        function ativarSistema() {
+            socket.emit('ativar_sistema');
+            addLog('Ativando sistema...');
+        }
+
+        // Desativar Sistema
+        function desativarSistema() {
+            socket.emit('desativar_sistema');
+            addLog('Desativando sistema...');
+        }
+
+        // Iniciar Gravação
+        async function iniciarGravacao() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    const reader = new FileReader();
+                    reader.readAsDataURL(audioBlob);
+                    reader.onloadend = () => {
+                        const base64Audio = reader.result;
+                        socket.emit('processar_audio', { audio: base64Audio });
+                    };
+                    
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                mediaRecorder.start();
+                document.getElementById('recordingIndicator').classList.add('active');
+                document.getElementById('btnGravar').disabled = true;
+                document.getElementById('btnParar').disabled = false;
+                addLog('Gravação iniciada');
+            } catch (error) {
+                alert('Erro ao acessar microfone: ' + error.message);
+                addLog('Erro ao acessar microfone');
+            }
+        }
+
+        // Parar Gravação
+        function pararGravacao() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                document.getElementById('recordingIndicator').classList.remove('active');
+                document.getElementById('btnGravar').disabled = false;
+                document.getElementById('btnParar').disabled = true;
+                addLog('Gravação parada. Processando...');
+            }
+        }
+
+        // Capturar Imagem com Timer
+        function capturarImagem() {
+            const badge = document.getElementById('statusBadge');
+            const videoContainer = document.querySelector('.video-container');
+            addLog('⏱️ Preparando captura em 3 segundos... Posicione-se!');
+            
+            // Desabilitar botão temporariamente
+            document.getElementById('btnCapturar').disabled = true;
+            
+            // Mostrar contagem regressiva
+            let countdown = 3;
+            const countdownInterval = setInterval(() => {
+                if (countdown > 0) {
+                    addLog(`📸 ${countdown}...`);
+                    // Feedback visual com classe especial
+                    badge.className = 'status-badge status-countdown';
+                    badge.textContent = `📸 ${countdown}`;
+                    
+                    // Flash visual na borda
+                    videoContainer.style.border = '5px solid #fbbf24';
+                    setTimeout(() => {
+                        videoContainer.style.border = 'none';
+                    }, 500);
+                    
+                    // Beep sonoro
+                    beep(600, 100);
+                    
+                    countdown--;
+                } else {
+                    clearInterval(countdownInterval);
+                    
+                    // Flash de captura
+                    videoContainer.style.border = '8px solid #d4af37';
+                    beep(1000, 200); // Som mais agudo para captura
+                    
+                    // Restaurar após meio segundo
+                    setTimeout(() => {
+                        videoContainer.style.border = 'none';
+                        badge.className = 'status-badge status-active';
+                        badge.textContent = '● Sistema Ativo';
+                        document.getElementById('btnCapturar').disabled = false;
+                    }, 500);
+                    
+                    // Capturar
+                    socket.emit('capturar_imagem');
+                    addLog('✨ *CLICK* Imagem capturada!');
+                }
+            }, 1000);
+        }
+
+        // Upload de Imagem
+        function uploadImagem(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            if (!file.type.startsWith('image/')) {
+                alert('Por favor, selecione um arquivo de imagem válido.');
+                return;
+            }
+            
+            addLog('📤 Enviando imagem...');
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const base64Image = e.target.result;
+                socket.emit('upload_imagem', { image: base64Image });
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Obter Descrição
+        function obterDescricao() {
+            socket.emit('obter_descricao');
+            addLog('Solicitando crítica...');
+        }
+
+        // Socket Events
+        socket.on('sistema_status', (data) => {
+            sistemaAtivo = data.ativo;
+            const badge = document.getElementById('statusBadge');
+            
+            if (data.ativo) {
+                badge.textContent = '● Sistema Ativo';
+                badge.className = 'status-badge status-active';
+                document.getElementById('btnGravar').disabled = false;
+                document.getElementById('btnCapturar').disabled = false;
+                document.getElementById('btnUpload').disabled = false;
+                document.getElementById('btnDescrever').disabled = false;
+                document.getElementById('btnDesativar').disabled = false;
+            } else {
+                badge.textContent = '● Sistema Inativo';
+                badge.className = 'status-badge status-inactive';
+                document.getElementById('btnGravar').disabled = true;
+                document.getElementById('btnCapturar').disabled = true;
+                document.getElementById('btnUpload').disabled = true;
+                document.getElementById('btnDescrever').disabled = true;
+                document.getElementById('btnDesativar').disabled = true;
+            }
+            
+            addLog(data.mensagem);
+        });
+
+        socket.on('imagem_capturada', (data) => {
+            if (data.success) {
+                const preview = document.getElementById('capturedPreview');
+                const img = document.getElementById('capturedImage');
+                img.src = data.image_url + '?t=' + new Date().getTime();
+                preview.style.display = 'block';
+                addLog(data.mensagem);
+            }
+        });
+
+        socket.on('imagem_uploaded', (data) => {
+            if (data.success) {
+                const preview = document.getElementById('capturedPreview');
+                const img = document.getElementById('capturedImage');
+                img.src = data.image_url + '?t=' + new Date().getTime();
+                preview.style.display = 'block';
+                addLog('✅ ' + data.mensagem);
+            }
+        });
+
+        socket.on('transcricao_completa', (data) => {
+            document.getElementById('transcricaoBox').innerHTML = data.transcricao || '<em>Nenhum áudio detectado</em>';
+            addLog('Transcrição concluída');
+        });
+
+        socket.on('processando', (data) => {
+            addLog(data.mensagem);
+        });
+
+        socket.on('descricao_completa', (data) => {
+            const respostaBox = document.getElementById('respostaBox');
+            const respostaText = document.getElementById('respostaText');
+            const audioResposta = document.getElementById('audioResposta');
+            
+            respostaText.textContent = data.resposta;
+            respostaBox.style.display = 'block';
+            
+            if (data.audio_url) {
+                audioResposta.src = data.audio_url + '?t=' + new Date().getTime();
+                audioResposta.style.display = 'block';
+                audioResposta.play();
+            }
+            
+            addLog('Descrição completa recebida');
+            
+            // Limpar transcrição
+            socket.emit('limpar_pergunta');
+        });
+
+        socket.on('erro', (data) => {
+            alert('Erro: ' + data.mensagem);
+            addLog('ERRO: ' + data.mensagem);
+        });
+
+        // Inicialização
+        addLog('Interface carregada. Pressione "Ativar Sistema" para começar.');
+    </script>
+</body>
+</html>
