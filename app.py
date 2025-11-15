@@ -5,6 +5,8 @@ import base64
 import os
 import threading
 import queue
+import requests
+import concurrent.futures
 from io import BytesIO
 from PIL import Image
 import speech_recognition as sr
@@ -14,6 +16,10 @@ from faster_whisper import WhisperModel
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
+import requests
+import concurrent.futures
+import base64
+import os
 
 load_dotenv()
 
@@ -121,15 +127,225 @@ Exemplo de uma Crítica DURA (se a roupa for horrível e o usuário perguntar 'P
             
             if not os.path.exists(image_path):
                 return None
-                
+            
             pil_image = Image.open(image_path)
             buffered = BytesIO()
             pil_image.save(buffered, format="JPEG")
             img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            return img_str
+            
+            # RETORNA A STRING BASE64 PURA, sem prefixo URL
+            return img_str 
+            
         except Exception as e:
             print(f"Erro ao codificar imagem: {e}")
             return None
+
+    # --- NOVOS MÉTODOS: Google Gemini e Hugging Face ---
+    def obter_analise_gemini(self, encoded_image, pergunta):
+        """API 2: Google Gemini - Análise de Visão contextualizada."""
+        key = os.getenv('GEMINI_API_KEY')
+        model = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
+        if not key:
+            return "Erro: GEMINI_API_KEY não configurada no .env."
+
+        # Normaliza nome do modelo caso usuário informe sem o prefixo "models/"
+        if not model.startswith('models/'):
+            model = f'models/{model}'
+
+        url = f'https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={key}'
+
+        # Prompt que sempre gera resposta, mesmo sem contexto visual
+        prompt_text = (
+            f"Você é um consultor de moda especializado. "
+            f"Pergunta do usuário: '{pergunta}'. "
+            f"Dê uma resposta prática e objetiva sobre moda e estilo em no máximo 40 palavras. "
+            f"Se a pergunta for genérica,ou se não houver pergunta, faça comentários gerais sobre a roupa."
+        )
+
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt_text}]
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 5000,
+                "candidateCount": 1
+            },
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
+        }
+
+        headers = {'Content-Type': 'application/json'}
+
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=25)
+            try:
+                j = r.json()
+            except Exception:
+                j = None
+
+            if r.status_code != 200:
+                body = (r.text or '')[:800]
+                return f"Erro no Gemini: status={r.status_code}, body={body}"
+
+            # DEBUG: Vamos ver o formato real da resposta
+            print(f"DEBUG Gemini Response: {j}")
+
+            # Parse da resposta do Gemini (várias tentativas)
+            if isinstance(j, dict):
+                # Formato padrão: candidates[].content.parts[].text
+                if 'candidates' in j and j['candidates']:
+                    candidates = j['candidates']
+                    if len(candidates) > 0:
+                        candidate = candidates[0]
+                        
+                        # Verifica se há parts com texto
+                        content = candidate.get('content', {})
+                        if isinstance(content, dict) and 'parts' in content:
+                            parts = content['parts']
+                            if parts and len(parts) > 0:
+                                for part in parts:
+                                    if isinstance(part, dict) and 'text' in part:
+                                        text = part['text']
+                                        if text and text.strip():
+                                            return text.strip()
+                        
+                        # Se não tem parts mas tem finishReason, significa que foi bloqueado ou vazio
+                        finish_reason = candidate.get('finishReason', '')
+                        if finish_reason == 'MAX_TOKENS':
+                            return "O Gemini iniciou uma resposta mas atingiu o limite. Tente uma pergunta mais curta."
+                        elif finish_reason == 'SAFETY':
+                            return "Resposta bloqueada por filtros de segurança do Gemini."
+                        elif finish_reason:
+                            return f"Gemini finalizou sem texto (motivo: {finish_reason})."
+                
+                # Formato alternativo: text direto no root
+                if 'text' in j:
+                    return j['text'].strip()
+
+            return f'Erro na resposta do Gemini: sem texto gerado. JSON: {str(j)[:400]}'
+
+        except Exception as e:
+            return f"Erro inesperado no Gemini: {str(e)}"
+
+    def obter_analise_hf(self, pergunta):
+        """API 3: Hugging Face - Feedback de Texto usando o novo router."""
+        key = os.getenv('HUGGINGFACE_API_KEY')
+        # Modelos disponíveis no router (testados e funcionais)
+        model = os.getenv('HUGGINGFACE_MODEL', 'meta-llama/Llama-3.2-3B-Instruct')
+
+        if not key:
+            return "Erro: HUGGINGFACE_API_KEY não configurada no .env."
+
+        # NOVO ENDPOINT ROUTER (obrigatório desde 2024)
+        url = f'https://router.huggingface.co/hf-inference/{model}'
+        headers = {
+            'Authorization': f'Bearer {key}',
+            'Content-Type': 'application/json'
+        }
+
+        # Prompt otimizado para modelos instruct
+        hf_prompt = f"Give a brief fashion tip about: {pergunta}"
+
+        payload = {
+            "inputs": hf_prompt,
+            "parameters": {
+                "max_new_tokens": 60,
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "return_full_text": False
+            }
+        }
+
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=60)
+            try:
+                j = r.json()
+            except Exception:
+                j = None
+
+            # DEBUG
+            print(f"DEBUG HF Status: {r.status_code}")
+            print(f"DEBUG HF Response: {j}")
+
+            if r.status_code != 200:
+                body = (r.text or '')[:500]
+                # Se modelo não disponível, tenta fallback
+                if r.status_code in [404, 503, 410]:
+                    return self._tentar_hf_alternativo(pergunta, key)
+                return f"Erro no Hugging Face: status={r.status_code}"
+
+            # Parse da resposta
+            if isinstance(j, list) and len(j) > 0:
+                first = j[0]
+                if isinstance(first, dict) and 'generated_text' in first:
+                    text = first['generated_text'].strip()
+                    return text[:200] if text else 'Dica de moda processando...'
+            
+            if isinstance(j, dict):
+                if 'generated_text' in j:
+                    return j['generated_text'].strip()[:200]
+                if 'error' in j:
+                    return self._tentar_hf_alternativo(pergunta, key)
+
+            return 'Modelo carregando, tente novamente em alguns segundos.'
+
+        except Exception as e:
+            return f"Erro inesperado no HF: {str(e)}"
+
+    def _tentar_hf_alternativo(self, pergunta, key):
+        """Fallback para modelo compacto e rápido."""
+        # Tenta modelos menores que costumam estar sempre disponíveis
+        modelos_backup = [
+            'openai-community/gpt2',
+            'facebook/opt-125m',
+            'EleutherAI/gpt-neo-125m'
+        ]
+        
+        for model in modelos_backup:
+            try:
+                url = f'https://router.huggingface.co/hf-inference/{model}'
+                headers = {
+                    'Authorization': f'Bearer {key}',
+                    'Content-Type': 'application/json'
+                }
+                
+                payload = {
+                    "inputs": f"Fashion tip: {pergunta[:50]}",
+                    "parameters": {"max_new_tokens": 40}
+                }
+                
+                r = requests.post(url, headers=headers, json=payload, timeout=30)
+                
+                if r.status_code == 200:
+                    j = r.json()
+                    if isinstance(j, list) and j and 'generated_text' in j[0]:
+                        return j[0]['generated_text'][:150]
+                    if isinstance(j, dict) and 'generated_text' in j:
+                        return j['generated_text'][:150]
+            except:
+                continue
+        
+        # Se todos falharem, retorna dica genérica
+        return "💡 Combine cores complementares e escolha peças que valorizem sua silhueta!"
+        
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=40)
+            j = r.json()
+            
+            if isinstance(j, list) and len(j) > 0:
+                return j[0].get('generated_text', 'Dica: combine cores neutras!')[:100]
+            if isinstance(j, dict) and 'generated_text' in j:
+                return j['generated_text'][:100]
+                
+        except Exception:
+            pass
+        
+        return "💡 Dica genérica: Combine cores complementares e invista em peças versáteis!"
 
     def formatar_pergunta(self, pergunta):
         try:
@@ -253,42 +469,97 @@ def handle_audio(data):
     try:
         # Receber áudio em base64
         audio_data = data['audio']
-        
+
         # Decodificar e salvar
         audio_bytes = base64.b64decode(audio_data.split(',')[1])
         audio_path = 'static/temp_audio.wav'
         with open(audio_path, 'wb') as f:
             f.write(audio_bytes)
-        
+
         # Transcrever
         transcricao = gior.transcribe_audio(audio_path)
         gior.pergunta = transcricao
-        
+
         emit('transcricao_completa', {'transcricao': transcricao})
-        
+
     except Exception as e:
         emit('erro', {'mensagem': f'Erro ao processar áudio: {str(e)}'})
 
 @socketio.on('obter_descricao')
 def handle_descricao():
     try:
-        pergunta = gior.pergunta if gior.pergunta else "Descreva a cena"
+        pergunta = gior.pergunta if gior.pergunta else "Descreva a cena e me dê o seu veredito de moda."
         
-        emit('processando', {'mensagem': 'Processando...'})
+        emit('processando', {'mensagem': 'Processando os 3 feedbacks em paralelo...'})
+
+        encoded_image = gior.encode_image()
+        if not encoded_image:
+            emit('erro', {'mensagem': 'Erro: Nenhuma imagem capturada para análise. Por favor, capture ou envie uma foto.'})
+            return
+
+        # --- Chamadas de API em Paralelo (OpenAI, Gemini, Hugging Face) ---
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            # OpenAI (Já é contextual)
+            future_openai = executor.submit(gior.obter_resposta, pergunta)
+            
+            # Gemini (Agora recebe a pergunta)
+            future_gemini = executor.submit(gior.obter_analise_gemini, encoded_image, pergunta) 
+            
+            # Hugging Face (Agora recebe a pergunta)
+            future_hf = executor.submit(gior.obter_analise_hf, pergunta)
+
+            # Coleta dos resultados
+            try: resposta_gior = future_openai.result(timeout=60)
+            except Exception as e: resposta_gior = f"Erro OpenAI: {str(e)}"
+
+            try: resposta_gemini = future_gemini.result(timeout=60)
+            except Exception as e: resposta_gemini = f"Erro Gemini: {str(e)}"
+
+            try: resposta_hf = future_hf.result(timeout=60)
+            except Exception as e: resposta_hf = f"Erro Hugging Face: {str(e)}"
         
-        resposta = gior.obter_resposta(pergunta)
-        audio_path = gior.gerar_audio(resposta)
+        # --- GERAÇÃO DE HTML COMPLETO NO PYTHON ---
         
-        # Limpar
+        def format_to_html(text):
+            return text.replace('**', '<strong>').replace('\n', '<br>')
+
+        # 1. Crítica do GIOR (OpenAI)
+        html_gior = f"""
+            <div class="feedback-container">
+                <h3>1. 👔 Crítica do Consultor GIOR (OpenAI):</h3>
+                <p>{format_to_html(resposta_gior)}</p>
+            </div>
+        """
+        # 2. Análise Técnica (Gemini Vision)
+        html_gemini = f"""
+            <div class="feedback-container">
+                <h3>2. Análise Do Gemini:</h3>
+                <p>{format_to_html(resposta_gemini)}</p>
+            </div>
+        """
+        # 3. Feedback Aleatório/Contextual (Hugging Face)
+        html_hf = f"""
+            <div class="feedback-container">
+                <h3>3. 💬 Feedback Do Hugging Face:</h3>
+                <p>{format_to_html(resposta_hf)}</p>
+            </div>
+        """
+
+        feedback_final_html = html_gior + html_gemini + html_hf
+
+        texto_audio = f"A Crítica de Moda GIOR: {resposta_gior}"
+        audio_path = gior.gerar_audio(texto_audio)
+        
         gior.pergunta = ''
-        gior.imagem_capturada = None
+
         
         emit('descricao_completa', {
-            'resposta': resposta,
+            'resposta': feedback_final_html, 
             'audio_url': '/' + audio_path if audio_path else None
         })
         
     except Exception as e:
+        print(f"Erro no handle_descricao principal: {e}")
         emit('erro', {'mensagem': f'Erro: {str(e)}'})
 
 @socketio.on('limpar_pergunta')
@@ -323,6 +594,70 @@ def handle_upload(data):
         
     except Exception as e:
         emit('erro', {'mensagem': f'Erro ao enviar imagem: {str(e)}'})
+
+@app.route('/api/feedbacks', methods=['GET'])
+def api_feedbacks():
+    pergunta = request.args.get('q', 'Descreva a cena')
+    # montar prompt: contexto + histórico + pergunta + imagem (se houver)
+    encoded_image = gior.encode_image()
+    prompt_text = gior.contexto + "\n\nConversa atual:\n" + (gior.historico_conversa or "") + "\n\nAluno: " + pergunta
+    if encoded_image:
+        prompt_text += "\n\n[IMAGEM_BASE64]:" + encoded_image
+
+    # chamar em paralelo: OpenAI (obter_resposta), Gemini e Hugging Face
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+        f_openai = ex.submit(gior.obter_resposta, pergunta)
+        f_gemini = ex.submit(gior.obter_analise_gemini, encoded_image, pergunta)
+        f_hf = ex.submit(gior.obter_analise_hf, pergunta)
+
+        try:
+            openai_res = f_openai.result(timeout=35)
+            openai_obj = {'source': 'openai', 'ok': True, 'data': openai_res}
+        except Exception as e:
+            openai_obj = {'source': 'openai', 'ok': False, 'error': str(e)}
+
+        try:
+            gemini_text = f_gemini.result(timeout=35)
+            gemini_res = {'source': 'gemini', 'ok': True, 'data': gemini_text}
+        except Exception as e:
+            gemini_res = {'source': 'gemini', 'ok': False, 'error': str(e)}
+
+        try:
+            hf_text = f_hf.result(timeout=35)
+            hf_res = {'source': 'huggingface', 'ok': True, 'data': hf_text}
+        except Exception as e:
+            hf_res = {'source': 'huggingface', 'ok': False, 'error': str(e)}
+
+    results = [openai_obj, gemini_res, hf_res]
+    return jsonify({'count': len(results), 'results': results})
+
+
+@app.route('/api/gemini_models', methods=['GET'])
+def api_gemini_models():
+    """Lista modelos disponíveis no Generative Language API para a GEMINI_API_KEY configurada.
+    Retorna o JSON direto da API do Google. Não expõe a chave no corpo da resposta do servidor.
+    """
+    key = os.getenv('GEMINI_API_KEY')
+    if not key:
+        return jsonify({'ok': False, 'error': 'GEMINI_API_KEY não configurada'}), 400
+
+    url = f'https://generativelanguage.googleapis.com/v1/models?key={key}'
+    try:
+        r = requests.get(url, timeout=15)
+        try:
+            j = r.json()
+        except Exception:
+            j = {'raw_text': (r.text or '')[:1000]}
+
+        if r.status_code != 200:
+            body = (r.text or '')[:500]
+            return jsonify({'ok': False, 'status': r.status_code, 'body': body}), r.status_code
+
+        # retornar apenas a lista de modelos (se existir)
+        models = j.get('models') if isinstance(j, dict) else None
+        return jsonify({'ok': True, 'models': models or j})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)

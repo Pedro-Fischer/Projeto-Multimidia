@@ -98,6 +98,11 @@
             animation: pulse 1s infinite;
         }
 
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         .captured-preview {
             margin-top: 20px;
             display: none;
@@ -187,23 +192,46 @@
             line-height: 1.6;
         }
 
+        /* AJUSTE CSS: Container Principal de Resposta deve ser transparente */
         .resposta-box {
-            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-            padding: 20px;
-            border-radius: 10px;
+            background: transparent; 
+            padding: 0; 
+            border-left: none;
             margin: 20px 0;
-            border-left: 4px solid #d4af37;
+            display: none; 
         }
 
-        .resposta-box h3 {
-            color: #d4af37;
-            margin-bottom: 10px;
+        /* NOVO CSS para as caixas de feedback individuais (geradas pelo Python) */
+        .feedback-container {
+            padding: 15px;
+            margin-bottom: 15px; 
+            border-radius: 8px;
+            background: #f9fafb; 
+            border-left: 5px solid #d4af37; 
+            color: #1a1a1a;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
-
-        .resposta-text {
+        
+        .feedback-container h3 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            color: #1a1a1a;
             font-size: 1.1em;
-            line-height: 1.8;
-            color: #f0f0f0;
+            border-bottom: 1px dashed #ccc;
+            padding-bottom: 5px;
+        }
+        
+        .feedback-container p {
+            font-size: 1em;
+            line-height: 1.5;
+            color: #333;
+        }
+        
+        /* Remove o estilo original da resposta-text que agora só contém os containers */
+        .resposta-text {
+            color: initial; 
+            font-size: initial;
+            line-height: initial;
         }
 
         audio {
@@ -220,11 +248,7 @@
             animation: pulse 1.5s infinite;
         }
 
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
+        
         .recording-indicator.active {
             display: block;
         }
@@ -271,7 +295,7 @@
         </header>
 
         <div class="main-grid">
-            <!-- Coluna da Câmera -->
+
             <div class="card">
                 <h2>Seu Look</h2>
                 <div class="video-container">
@@ -285,7 +309,7 @@
                 </div>
             </div>
 
-            <!-- Coluna de Controles -->
+
             <div class="card">
                 <h2>🎮 Controles</h2>
                 <div class="controls">
@@ -326,7 +350,7 @@
             </div>
         </div>
 
-        <!-- Seção de Transcrição e Resposta -->
+
         <div class="card">
             <h2>Sua Pergunta e Crítica</h2>
             
@@ -338,8 +362,7 @@
             </div>
 
             <div class="resposta-box" id="respostaBox" style="display: none;">
-                <h3>👔 Crítica do GIOR:</h3>
-                <div class="resposta-text" id="respostaText"></div>
+                <div class="resposta-text" id="respostaText"></div> 
                 <audio id="audioResposta" controls style="display: none;"></audio>
             </div>
 
@@ -582,7 +605,8 @@
             const respostaText = document.getElementById('respostaText');
             const audioResposta = document.getElementById('audioResposta');
             
-            respostaText.textContent = data.resposta;
+            // MANIPULAÇÃO DOM: Insere o HTML completo gerado pelo Python
+            respostaText.innerHTML = data.resposta;
             respostaBox.style.display = 'block';
             
             if (data.audio_url) {
